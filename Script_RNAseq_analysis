@@ -1,0 +1,113 @@
+
+#### Identification of BRAVO regulated genes in the QC ####
+
+dataARSyN_matrix_QCWTbravo <- filtered_dataARSyN_matrix[,c(7:9,1:3)] #Columns with the QC data in bravo mutant and WT.
+Mutant2a<-c("bravo","bravo","bravo","aWT","aWT","aWT")
+myfactorsWTbravo_a <- data.frame(Mutant2a)
+
+dataARSyN_QCWTbravo <- NOISeq::readData(data=dataARSyN_matrix_QCWTbravo, factors=myfactorsWTbravo_a, length=length_matrix, gc=GCcontent)
+
+mynoiseqbio = noiseqbio(dataARSyN_QCWTbravo, norm = "n", factor = "Mutant2a")
+mynoiseqbioDE = degenes(mynoiseqbio, q=0.95)
+
+table(mynoiseqbioDE[,"theta"] < 0)
+
+QC_WTvsbravo_allgenes<-mynoiseqbio@results[[1]]
+QC_WTvsbravo <- mynoiseqbioDE
+
+QC_WTvsbravo[,8]<-GeneNames[match(rownames(QC_WTvsbravo),GeneNames$Gene.stable.ID,nomatch = NA),"Gene.name"]
+
+
+#### Identificacion of WOX5 regulated genes in the QC ####
+
+#Import the list with the ATG and the expression values. Dataset published in Clark et al., 2020:
+
+`wox5;pWOX5GFP` <- read.csv(".../wox5;pWOX5GFP.csv", sep=";")
+
+#Calculate FC
+wox5ExpressionValues<-`wox5;pWOX5GFP`[,c(1,2,3)]
+wox5ExpressionValues[,4]<-wox5ExpressionValues$W5S/wox5ExpressionValues$w5W5
+wox5ExpressionValues[,5]<-log2(wox5ExpressionValues$V4)
+colnames(wox5ExpressionValues)<-c("ATG","W5","w5W5","FC_W5_W5w5","log2FC_W5_W5w5")  
+wox5ExpressionValues[,6]<-`wox5;pWOX5GFP`[,"qW5S_w5W5"]
+colnames(wox5ExpressionValues)<-c("ATG","W5","w5W5","FC_W5_W5w5","log2FC_W5_W5w5","qvalue")
+
+#Choose only the genes with qvalue lower than 0.05. 
+
+wox5Genes_qv0.05<-wox5ExpressionValues[which(wox5ExpressionValues$qvalue<0.05),]
+
+#Remove the genes that were not deteted in the RNA seq. They have expression values of 0:
+wox5Genes_qv0.05<-wox5Genes_qv0.05[which(wox5Genes_qv0.05$W5!=0),]
+wox5Genes_qv0.05<-wox5Genes_qv0.05[which(wox5Genes_qv0.05$w5W5!=0),]
+
+
+#### Analysis of BRAVO and WOX5 regulated genes ####
+
+bravoandwox5inQC<-intersect(rownames(QC_WTvsbravo),rownames(wox5Genes_qv0.05))
+
+commonbravowox5_FCinbravo <- as.numeric(QC_WTvsbravo[bravoandwox5inQC,5])
+commonbravowox5_FCinwox5 <- as.numeric(wox5Genes_qv0.05[bravoandwox5inQC,5])
+
+commonbravowox5<- cbind(commonbravowox5_FCinbravo,commonbravowox5_FCinwox5)
+rownames(commonbravowox5)<-bravoandwox5inQC
+colnames(commonbravowox5)<-c("log2FC_WTvsbravo", "log2FC_WTvswox5")
+
+write.table(commonbravowox5, "commonbravowox5.txt", row.names = F)
+
+rownames(commonbravowox5)<-commonbravowox5[,1]
+commonbravowox5<-commonbravowox5[,-c(1)]
+
+
+#### Clustering analysis ####
+
+clusters_qc <- kmeans(commonbravowox5,12)
+
+# To visualize clusters as lineplots
+
+tiff(filename = "clusters_commonbravowox5.tiff", width = 480, height = 480, units="px")
+
+layout(matrix(c(1:12),3,4))
+par(mar = c(2,2,2,2))
+
+for (i in 1:12) {
+  clust1 <- commonbravowox5[clusters_qc$cluster==i,]
+  plot(1:ncol(clust1), apply(clust1,2,mean), type = "l", ylim=c(-4,4), xaxt="n", xlab="", ylab="") #ylim=range(clust1)
+  axis(1, at=1:ncol(clust1), labels = c("log2FC_bravo", "log2FC_wox5"), las=2, cex.axis=0.6)
+  for (j in 1 : nrow(clust1)) {
+    lines(1:ncol(clust1), clust1[j,], col="gray")
+  }
+  lines(1:ncol(clust1), apply(clust1,2,mean))
+}
+
+dev.off()
+
+# To get the genes of each cluster. 
+
+for (i in 1:12) {
+    nam<-paste("ClusterinQC_", i, sep = "")
+  assign(nam, commonbravowox5[clusters_qc$cluster==i,])
+  }
+
+# Heatmap to draw the genes and the log2FC
+library(gplots)
+
+mycolors<-colorpanel(400,low="#08306b",high="#c71515",mid ="#ffffff") 
+
+lmat=rbind(c(3,3,3),c(2,1,0),c(4,4,0))
+lwid=c(0.2,0.21,1)
+lhei=c(0.3,2,0.35)
+
+png("Common_wtvsbravo_WTvswox5_Cluster_2_9_clustered.png",width = 18, height = 22, units = "cm",res = 600) 
+heatmap.2((Cluster_2_genes),margins = c(5,5),
+          col=mycolors, na.color="white", 
+          scale="none", 
+          dendrogram = "none",
+          Rowv=TRUE,Colv=FALSE, 
+          key=T,keysize=0.2,key.xlab = "log2(FC)", 
+          density.info="none",colsep=c(0), 
+          trace="none",labCol = c("WTvsbravo", "WTvswox5"),
+          cexCol=1,cexRow=0.9,srtCol = 45, 
+          main= , 
+          lmat=lmat,lwid=lwid,lhei=lhei) 
+dev.off()
+
